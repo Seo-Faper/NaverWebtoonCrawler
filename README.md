@@ -5,5 +5,6 @@ python NaverWebtoonTitleCrawler.py <titleId>
 ```
 ## Example
 ```
-python NaverWebtoonTitleCrawler.py 641253
+python NaverWebtoonTitleCrawler.py -f 641253
+python NaverWebtoonTItleCrawler.py -w mon|tue|wed|thu|fri|sat|sun
 ```
