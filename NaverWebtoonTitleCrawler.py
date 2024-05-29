@@ -3,9 +3,10 @@ import requests
 import random
 import sys
 from tqdm import tqdm
+import re
+import time, random
 
 class InfoCrawler():
-
     def __init__(self):
         self.base_url = ""
         self.headers = {}
@@ -43,58 +44,86 @@ class InfoCrawler():
         return user_agent
 
 class NaverWebtoonTitle(InfoCrawler):
-    def __init__(self, title_id):
+    def __init__(self):
         super().__init__()
-        self.title_id = title_id
-        self.base_url = "https://comic.naver.com/api/article/list?titleId={}&page={}&sort=ASC".format(title_id, "{}")
+        self.base_url = "https://comic.naver.com/api/article/list?titleId={}&page={}&sort=ASC"
         self.set_random_user_agent()
         self.conn = sqlite3.connect('webtoons.db')
-        self.create_table()
 
-    def create_table(self):
-        table_name = f"webtoon_{self.title_id}"
+    def create_table(self, title_id):
+        table_name = f"webtoon_{title_id}"
         with self.conn:
             self.conn.execute(f'''CREATE TABLE IF NOT EXISTS {table_name}
                                  (no INTEGER PRIMARY KEY,
                                   thumbnailUrl TEXT,
                                   subtitle TEXT,
-                                  detailUrl TEXT)''')
+                                  detailUrl TEXT
+                                  )''')
 
-    def insert_data(self, no, thumbnailUrl, subtitle, detailUrl):
-        table_name = f"webtoon_{self.title_id}"
+    def insert_data(self, title_id, no, thumbnailUrl, subtitle, detailUrl):
+        table_name = f"webtoon_{title_id}"
         with self.conn:
             self.conn.execute(f'INSERT INTO {table_name} (no, thumbnailUrl, subtitle, detailUrl) VALUES (?, ?, ?, ?)',
                               (no, thumbnailUrl, subtitle, detailUrl))
 
-    def parse_page(self, page_num):
-        target_url = self.base_url.format(page_num)
-        res = requests.get(target_url, headers=self.headers).json()
-        total_count = res['totalCount']
-        page_count = (total_count + 19) // 20
-        page_num = int(page_num)
-        
-        with tqdm(total=page_count, desc="Progress", unit="page") as pbar:
-            while page_num <= page_count:
-                target_url = self.base_url.format(page_num)
-                res = requests.get(target_url, headers=self.headers).json()
-                for article in res['articleList']:
-                    no = article['no']
-                    thumbnailUrl = article['thumbnailUrl']
-                    subtitle = article['subtitle']
-                    detailUrl = 'https://comic.naver.com/webtoon/detail?titleId={}&no={}'.format(self.title_id, no)
-                    self.insert_data(no, thumbnailUrl, subtitle, detailUrl)
-                page_num += 1
-                pbar.update(1)
-        print(f"페이지 {page_count} 개가 저장되었습니다.")
+    def week_parse(self, week):
+        url = f"https://comic.naver.com/api/webtoon/titlelist/weekday?week={week}&order=user"
+        res = requests.get(url, headers=self.headers).json()
+       
+        for data in res['titleList']:
+          print(str(data['titleName'])+" 추출 시작")
+          title_id = str(data['titleId'])+"_"+str(week)
+          self.create_table(str(data['titleId'])+"_"+str(week))  
+          self.parse_page("1",title_id)
 
+    def parse_page(self, page_num, title_id): 
+        try:
+            numbers = re.findall(r'\d+', title_id)
+            result = ''.join(numbers)
+            target_url = self.base_url.format(result, page_num)
+            res = requests.get(target_url, headers=self.headers).json()
+            total_count = res['totalCount']
+            
+            page_count = (total_count + 19) // 20
+            page_num = int(page_num)
+            
+            with tqdm(total=page_count, desc="Progress", unit="page") as pbar:
+                while page_num <= page_count:
+                    target_url = self.base_url.format(result, page_num)
+                    res = requests.get(target_url, headers=self.headers).json()
+                    for article in res['articleList']:
+                        no = article['no']
+                        thumbnailUrl = article['thumbnailUrl']
+                        subtitle = article['subtitle']
+                        detailUrl = f'https://comic.naver.com/webtoon/detail?titleId={result}&no={no}'
+                        
+                        self.insert_data(title_id, no, thumbnailUrl, subtitle, detailUrl)
+                    page_num += 1
+                    pbar.update(1)
+            print(f"페이지 {page_count} 개가 저장되었습니다.")
+        except:
+            print("로그인이 필요한 웹툰입니다.")
 if __name__ == "__main__":
     if len(sys.argv) < 2:
         print("""
     사용법 : python NaverWebtoonTitleCrawler.py <titleId>
+    옵션 : 
+        요일별 웹툰 추출
+            -w <요일> 
               
-    예시 : python NaverWebtoonTitleCrawler.py 641253
+        웹툰 본문 이미지 추출
+            -f <titleId>
+
+    예시 : python NaverWebtoonTitleCrawler.py -f 641253
+           python NaverWebtoonTItleCrawler.py -w mon|tue|wed|thu|fri|sat|sun
         """)
+    elif len(sys.argv) == 3 and sys.argv[1] == '-w':
+        week = sys.argv[2]
+        naver = NaverWebtoonTitle()
+        naver.week_parse(week)
     else:
-        titleId = sys.argv[1]
-        naver = NaverWebtoonTitle(titleId)
-        naver.parse_page("1")
+        titleId = sys.argv[2]
+
+        naver = NaverWebtoonTitle()
+        naver.create_table(titleId)
+        naver.parse_page("1", titleId)
